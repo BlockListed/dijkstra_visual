@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 sdl2 = { version = "0.36.0", features = ["ttf"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

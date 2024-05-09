@@ -1,7 +1,4 @@
-use std::{
-    cell::Cell,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use sdl2::{
     pixels::Color,
@@ -9,6 +6,7 @@ use sdl2::{
     render::{Canvas, RenderTarget, TextureCreator},
     ttf::Font,
 };
+use tracing_subscriber::fmt::format::FmtSpan;
 
 const W: u32 = 879;
 const H: u32 = 879;
@@ -18,6 +16,13 @@ const DELAY_MS: u64 = 5;
 const ENABLE_ASTAR: bool = true;
 
 fn main() {
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_span_events(FmtSpan::CLOSE)
+        .init();
+
     let sdl_context = sdl2::init().unwrap();
 
     let video = sdl_context.video().unwrap();
@@ -115,7 +120,7 @@ fn render_text<T: RenderTarget, C>(
         .unwrap();
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum CellState {
     Unknown,
     Unvisited { dist: u32 },
@@ -124,6 +129,7 @@ enum CellState {
     OnPath,
 }
 
+#[derive(Debug)]
 pub struct Grid {
     cells: Vec<Vec<CellState>>,
 
@@ -237,6 +243,7 @@ impl Grid {
             .flatten()
     }
 
+    #[tracing::instrument(skip(self))]
     fn dijkstra_iteration(&mut self) {
         if self.current == self.goal {
             return;
