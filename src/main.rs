@@ -42,7 +42,7 @@ fn main() {
 
     let mut pump = sdl_context.event_pump().unwrap();
 
-    let mut grid = Grid::new(80, 80, (64, 4), (73, 40));
+    let mut grid = Grid::new(80, 80, (64, 4), (73, 65));
 
     grid.draw_obstacle((4, 16), (18, 4));
     grid.draw_obstacle((24, 40), (80, 0));
@@ -72,7 +72,7 @@ fn main() {
             last_iteration = Instant::now();
         }
 
-        canvas.set_draw_color(Color::BLACK);
+        canvas.set_draw_color(Color::GRAY);
         canvas.clear();
 
         grid.draw_to_canvas(&mut canvas, W, H);
@@ -116,7 +116,7 @@ fn render_text<T: RenderTarget, C>(
     x: i32,
     y: i32,
 ) {
-    let surface = font.render(text).solid(Color::WHITE).unwrap();
+    let surface = font.render(text).solid(Color::BLACK).unwrap();
     let mut rect = surface.rect();
     rect.offset(x, y);
 
@@ -134,10 +134,33 @@ enum CellState {
     OnPath,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+struct UnvisitedState {
+    /// This optionally includes euclidean distance when using A*
+    pub dist: u32,
+    /// This never includes euclidean distance
+    pub actual_dist: u32,
+    pub cell: (u32, u32),
+}
+
+impl Ord for UnvisitedState {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.dist.cmp(&self.dist)
+            .then(other.actual_dist.cmp(&self.actual_dist))
+            .then_with(|| self.cell.cmp(&other.cell))
+    }
+}
+
+impl PartialOrd for UnvisitedState {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Debug)]
 pub struct Grid {
     cells: Vec<Vec<CellState>>,
-    unvisited: BinaryHeap<(Reverse<u32>, (u32, u32))>,
+    unvisited: BinaryHeap<UnvisitedState>,
 
     start: (u32, u32),
     current: (u32, u32),
@@ -275,10 +298,12 @@ impl Grid {
 
             match state {
                 CellState::Unknown => {
+                    let dist = self.current_dist + 1;
+
                     self.set_cell(n, CellState::Unvisited);
 
                     self.unvisited
-                        .push((Reverse(self.get_dist(n, self.current_dist + 1)), n));
+                        .push(UnvisitedState { dist: self.get_dist(n, dist), actual_dist: dist, cell: n })
                 }
                 CellState::Unvisited => continue,
                 CellState::Visited { dist } => {
@@ -299,8 +324,8 @@ impl Grid {
         );
 
         if let Some(cell) = self.unvisited.pop() {
-            self.current = cell.1;
-            self.current_dist = cell.0 .0;
+            self.current = cell.cell;
+            self.current_dist = cell.actual_dist;
         } else {
             println!("no possible path");
             return;
