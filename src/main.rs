@@ -1,4 +1,6 @@
-use sdl2::{pixels::Color, rect::Rect, render::{Canvas, RenderTarget}};
+use std::time::Instant;
+
+use sdl2::{pixels::Color, rect::Rect, render::{Canvas, RenderTarget, TextureCreator}, ttf::Font};
 
 const W: u32 = 819;
 const H: u32 = 819;
@@ -19,14 +21,31 @@ fn main() {
     grid
         .set_width(20)
         .set_height(20);
+
+    let texture_creator = canvas.texture_creator();
+    
+    let ttf = sdl2::ttf::init().unwrap();
+
+    let font = ttf.load_font("/usr/share/fonts/liberation/LiberationMono-Regular.ttf", 20).unwrap();
+
+    // first set frame_time to it's value, if we were at 60 fps
+    let mut frame_time = 0.016;
     
     'main: loop {
+        let start_time = Instant::now();
+
         canvas.set_draw_color(Color::RGB(127, 127, 127));
         canvas.clear();
 
         grid.draw_to_canvas(&mut canvas, W, H);
 
+        render_text(&mut canvas, &texture_creator, &font, &format!("Frame Time: {:.5}", frame_time), 0, 0);
+
+        render_text(&mut canvas, &texture_creator, &font, &format!("{:.1}FPS", 1.0 / frame_time), 0, 20);
+
         canvas.present();
+
+        frame_time = start_time.elapsed().as_secs_f64();
 
         for e in pump.poll_iter() {
             match e {
@@ -35,6 +54,14 @@ fn main() {
             }
         }
     }
+}
+
+fn render_text<T: RenderTarget, C>(canvas: &mut Canvas<T>, texture_creater: &TextureCreator<C>, font: &Font, text: &str, x: i32, y: i32) {
+    let surface = font.render(text).solid(Color::WHITE).unwrap();
+    let mut rect = surface.rect();
+    rect.offset(x, y);
+
+    canvas.copy(&surface.as_texture(texture_creater).unwrap(), None, rect).unwrap();
 }
 
 #[derive(Default)]
