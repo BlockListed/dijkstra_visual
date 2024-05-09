@@ -32,7 +32,7 @@ fn main() {
 
     let mut pump = sdl_context.event_pump().unwrap();
 
-    let mut grid = Grid::new(80, 80, (4, 4), (73, 40));
+    let mut grid = Grid::new(80, 80, (64, 4), (73, 40));
 
     grid.draw_obstacle((4, 16), (18, 4));
     grid.draw_obstacle((24, 40), (80, 0));
