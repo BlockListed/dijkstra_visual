@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    cmp::Reverse,
+    collections::BinaryHeap,
+    time::{Duration, Instant},
+};
 
 use sdl2::{
     pixels::Color,
@@ -16,7 +20,8 @@ const DELAY_MS: u64 = 5;
 const ENABLE_ASTAR: bool = true;
 
 fn main() {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let env_filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
@@ -123,7 +128,7 @@ fn render_text<T: RenderTarget, C>(
 #[derive(Clone, Copy, Debug)]
 enum CellState {
     Unknown,
-    Unvisited { dist: u32 },
+    Unvisited,
     Visited { dist: u32 },
     Obstacle,
     OnPath,
@@ -132,9 +137,11 @@ enum CellState {
 #[derive(Debug)]
 pub struct Grid {
     cells: Vec<Vec<CellState>>,
+    unvisited: BinaryHeap<(Reverse<u32>, (u32, u32))>,
 
     start: (u32, u32),
     current: (u32, u32),
+    current_dist: u32,
     goal: (u32, u32),
 }
 
@@ -145,12 +152,14 @@ impl Grid {
 
         let mut grid = Self {
             cells: vec![vec![CellState::Unknown; h as usize]; w as usize],
+            unvisited: BinaryHeap::new(),
             start,
             current: start,
+            current_dist: 0,
             goal,
         };
 
-        grid.set_cell(grid.current, CellState::Unvisited { dist: 0 });
+        grid.set_cell(grid.current, CellState::Unvisited);
 
         grid
     }
@@ -205,7 +214,6 @@ impl Grid {
 
             self.set_cell((x, y), CellState::Obstacle);
         }
-
     }
 
     fn get_neighbors(&self, cell: (u32, u32)) -> Vec<(u32, u32)> {
@@ -243,41 +251,38 @@ impl Grid {
             .flatten()
     }
 
+    fn get_dist(&self, cell: (u32, u32), dist: u32) -> u32 {
+        if ENABLE_ASTAR {
+            let euclid_dist = (((cell.0 as i32 - self.goal.0 as i32).pow(2)
+                + (cell.1 as i32 - self.goal.1 as i32).pow(2))
+                as f64)
+                .sqrt() as u32;
+
+            dist + euclid_dist
+        } else {
+            dist
+        }
+    }
+
     #[tracing::instrument(skip(self))]
     fn dijkstra_iteration(&mut self) {
         if self.current == self.goal {
             return;
         }
 
-        let curr_dist = match self.get_cell(self.current).unwrap() {
-            CellState::Unvisited { dist } => dist,
-            _ => panic!("current should always be an unvisited cell"),
-        };
-
         for n in self.get_neighbors(self.current) {
             let state = self.get_cell(n).unwrap();
 
             match state {
                 CellState::Unknown => {
-                    self.set_cell(
-                        n,
-                        CellState::Unvisited {
-                            dist: curr_dist + 1,
-                        },
-                    );
+                    self.set_cell(n, CellState::Unvisited);
+
+                    self.unvisited
+                        .push((Reverse(self.get_dist(n, self.current_dist + 1)), n));
                 }
-                CellState::Unvisited { dist } => {
-                    if curr_dist + 1 < dist {
-                        self.set_cell(
-                            n,
-                            CellState::Unvisited {
-                                dist: curr_dist + 1,
-                            },
-                        );
-                    }
-                }
+                CellState::Unvisited => continue,
                 CellState::Visited { dist } => {
-                    assert!(dist <= curr_dist + 1);
+                    assert!(dist <= self.current_dist + 1);
                 }
                 CellState::Obstacle => continue,
                 CellState::OnPath => unreachable!(
@@ -286,28 +291,16 @@ impl Grid {
             }
         }
 
-        self.set_cell(self.current, CellState::Visited { dist: curr_dist });
+        self.set_cell(
+            self.current,
+            CellState::Visited {
+                dist: self.current_dist,
+            },
+        );
 
-        if let Some(cell) = self
-            .iter()
-            .filter_map(|(pos, state)| match state {
-                CellState::Unvisited { dist } => Some((pos, dist)),
-                _ => None,
-            })
-            .min_by_key(|(pos, dist)| {
-                if ENABLE_ASTAR {
-                    let euclid_dist = (((pos.0 as i32 - self.goal.0 as i32).pow(2)
-                        + (pos.1 as i32 - self.goal.1 as i32).pow(2))
-                        as f64)
-                        .sqrt() as u32;
-
-                    dist + euclid_dist
-                } else {
-                    *dist
-                }
-            })
-        {
-            self.current = cell.0;
+        if let Some(cell) = self.unvisited.pop() {
+            self.current = cell.1;
+            self.current_dist = cell.0 .0;
         } else {
             println!("no possible path");
             return;
