@@ -10,10 +10,10 @@ use sdl2::{
     ttf::Font,
 };
 
-const W: u32 = 819;
-const H: u32 = 819;
+const W: u32 = 879;
+const H: u32 = 879;
 
-const DELAY_MS: u64 = 30;
+const DELAY_MS: u64 = 5;
 
 const ENABLE_ASTAR: bool = true;
 
@@ -32,9 +32,13 @@ fn main() {
 
     let mut pump = sdl_context.event_pump().unwrap();
 
-    let mut grid = Grid::new(20, 20, (4, 4), (15, 19));
+    let mut grid = Grid::new(80, 80, (4, 4), (73, 40));
 
     grid.draw_obstacle((4, 16), (18, 4));
+    grid.draw_obstacle((24, 40), (80, 0));
+    grid.draw_obstacle((15, 8), (80, 8));
+    grid.draw_obstacle((0, 30), (30, 30));
+    grid.draw_obstacle((4, 70), (70, 20));
 
     let texture_creator = canvas.texture_creator();
 
