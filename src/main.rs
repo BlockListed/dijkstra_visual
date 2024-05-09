@@ -15,6 +15,8 @@ const H: u32 = 819;
 
 const DELAY_MS: u64 = 30;
 
+const ENABLE_ASTAR: bool = true;
+
 fn main() {
     let sdl_context = sdl2::init().unwrap();
 
@@ -31,6 +33,8 @@ fn main() {
     let mut pump = sdl_context.event_pump().unwrap();
 
     let mut grid = Grid::new(20, 20, (4, 4), (15, 19));
+
+    grid.draw_obstacle((4, 16), (18, 4));
 
     let texture_creator = canvas.texture_creator();
 
@@ -112,6 +116,7 @@ enum CellState {
     Unknown,
     Unvisited { dist: u32 },
     Visited { dist: u32 },
+    Obstacle,
     OnPath,
 }
 
@@ -178,6 +183,19 @@ impl Grid {
             .map(|cell| {
                 *cell = state;
             });
+    }
+
+    pub fn draw_obstacle(&mut self, start: (u32, u32), end: (u32, u32)) {
+        let m = (start.1 as f64 - end.1 as f64) / (start.0 as f64 - end.0 as f64);
+
+        for x in start.0..end.0 {
+            let y = (m * (x as f64 - start.0 as f64)) + start.1 as f64;
+
+            let y = y.round() as u32;
+
+            self.set_cell((x, y), CellState::Obstacle);
+        }
+
     }
 
     fn get_neighbors(&self, cell: (u32, u32)) -> Vec<(u32, u32)> {
@@ -250,6 +268,7 @@ impl Grid {
                 CellState::Visited { dist } => {
                     assert!(dist <= curr_dist + 1);
                 }
+                CellState::Obstacle => continue,
                 CellState::OnPath => unreachable!(
                     "we shouldn't get here, because cells are only set to onpath on completion"
                 ),
@@ -264,7 +283,18 @@ impl Grid {
                 CellState::Unvisited { dist } => Some((pos, dist)),
                 _ => None,
             })
-            .min_by_key(|(_, dist)| *dist)
+            .min_by_key(|(pos, dist)| {
+                if ENABLE_ASTAR {
+                    let euclid_dist = (((pos.0 as i32 - self.goal.0 as i32).pow(2)
+                        + (pos.1 as i32 - self.goal.1 as i32).pow(2))
+                        as f64)
+                        .sqrt() as u32;
+
+                    dist + euclid_dist
+                } else {
+                    *dist
+                }
+            })
         {
             self.current = cell.0;
         } else {
@@ -335,6 +365,7 @@ impl Grid {
                             CellState::Unknown => Color::GREY,
                             CellState::Unvisited { .. } => Color::RED,
                             CellState::Visited { .. } => Color::YELLOW,
+                            CellState::Obstacle => Color::WHITE,
                             CellState::OnPath => Color::MAGENTA,
                         }
                     }
