@@ -76,18 +76,24 @@ fn main() {
         .load_font("/usr/share/fonts/liberation/LiberationMono-Regular.ttf", 20)
         .unwrap();
 
-    let mut last_iteration = Instant::now();
+    let dijkstra_interval = Duration::from_millis(args.delay);
+    let frame_interval = Duration::from_secs_f64(1.0 / args.fps as f64);
 
-    let mut last_frame = Instant::now();
+    let mut begin_last_dijkstra = Instant::now();
+    let mut begin_last_frame = Instant::now();
+
+    let mut finished_last_frame = Instant::now();
 
     'main: loop {
-        if last_iteration.elapsed() >= Duration::from_millis(args.delay) {
-            grid.dijkstra_iteration();
+        if begin_last_dijkstra.elapsed() >= dijkstra_interval {
+            begin_last_dijkstra = Instant::now();
 
-            last_iteration = Instant::now();
+            grid.dijkstra_iteration();
         }
 
-        if last_frame.elapsed() >= Duration::from_secs_f64(1.0 / args.fps as f64) {
+        if begin_last_frame.elapsed() >= dijkstra_interval {
+            begin_last_frame = Instant::now();
+
             canvas.set_draw_color(Color::GRAY);
             canvas.clear();
 
@@ -127,11 +133,10 @@ fn main() {
             canvas.present();
 
             histogram
-                .record(last_frame.elapsed().as_micros() as u64)
+                .record(finished_last_frame.elapsed().as_micros() as u64)
                 .unwrap();
 
-            // TODO: technically we want the time between presents to be 1.0 / args.fps seconds
-            last_frame = Instant::now();
+            finished_last_frame = Instant::now();
         }
 
         for e in pump.poll_iter() {
@@ -140,6 +145,11 @@ fn main() {
                 _ => continue,
             }
         }
+
+        let time_till_dijkstra = dijkstra_interval.saturating_sub(begin_last_dijkstra.elapsed());
+        let time_till_frame = frame_interval.saturating_sub(begin_last_frame.elapsed());
+
+        std::thread::sleep(std::cmp::min(time_till_dijkstra, time_till_frame));
     }
 }
 
