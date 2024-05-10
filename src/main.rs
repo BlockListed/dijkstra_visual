@@ -312,18 +312,6 @@ impl Grid {
         neighbors
     }
 
-    fn iter(&self) -> impl Iterator<Item = ((u32, u32), CellState)> + '_ {
-        self.cells
-            .iter()
-            .enumerate()
-            .map(|(x, col)| {
-                col.iter()
-                    .enumerate()
-                    .map(move |(y, cell)| ((x as u32, y as u32), *cell))
-            })
-            .flatten()
-    }
-
     fn get_dist(&self, cell: (u32, u32), dist: u32) -> u32 {
         if self.enable_astar {
             let euclid_dist = (((cell.0 as i32 - self.goal.0 as i32).pow(2)
