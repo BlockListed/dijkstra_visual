@@ -1,9 +1,9 @@
 use std::{
-    cmp::Reverse,
     collections::BinaryHeap,
     time::{Duration, Instant},
 };
 
+use clap::Parser;
 use sdl2::{
     pixels::Color,
     rect::Rect,
@@ -15,13 +15,28 @@ use tracing_subscriber::fmt::format::FmtSpan;
 const W: u32 = 879;
 const H: u32 = 879;
 
-const DELAY_MS: u64 = 5;
+/// Visual dijkstra/A* demo
+#[derive(clap::Parser)]
+#[command(about)]
+struct Args {
+    /// Delay between dijkstra iterations (ms)
+    #[arg(short, long, default_value_t = 30)]
+    delay: u64,
 
-const ENABLE_ASTAR: bool = true;
+    /// Target FPS
+    #[arg(long, default_value_t = 60)]
+    fps: u32,
+
+    /// Enable A* instead of dijkstra, using euclidean distance as heuristic
+    #[arg(long)]
+    enable_astar: bool,
+}
 
 fn main() {
     let env_filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+
+    let args = Args::parse();
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
@@ -29,6 +44,9 @@ fn main() {
         .init();
 
     let sdl_context = sdl2::init().unwrap();
+
+    let mut histogram =
+        hdrhistogram::Histogram::<u64>::new_with_bounds(1, 15 * 1000 * 1000, 3).unwrap();
 
     let video = sdl_context.video().unwrap();
 
@@ -42,7 +60,7 @@ fn main() {
 
     let mut pump = sdl_context.event_pump().unwrap();
 
-    let mut grid = Grid::new(80, 80, (64, 4), (73, 65));
+    let mut grid = Grid::new(80, 80, (64, 4), (74, 40), args.enable_astar);
 
     grid.draw_obstacle((4, 16), (18, 4));
     grid.draw_obstacle((24, 40), (80, 0));
@@ -58,46 +76,63 @@ fn main() {
         .load_font("/usr/share/fonts/liberation/LiberationMono-Regular.ttf", 20)
         .unwrap();
 
-    // first set frame_time to it's value, if we were at 60 fps
-    let mut frame_time = 0.016;
-
     let mut last_iteration = Instant::now();
 
-    'main: loop {
-        let start_time = Instant::now();
+    let mut last_frame = Instant::now();
 
-        if last_iteration.elapsed() >= Duration::from_millis(DELAY_MS) {
+    'main: loop {
+        if last_iteration.elapsed() >= Duration::from_millis(args.delay) {
             grid.dijkstra_iteration();
 
             last_iteration = Instant::now();
         }
 
-        canvas.set_draw_color(Color::GRAY);
-        canvas.clear();
+        if last_frame.elapsed() >= Duration::from_secs_f64(1.0 / args.fps as f64) {
+            canvas.set_draw_color(Color::GRAY);
+            canvas.clear();
 
-        grid.draw_to_canvas(&mut canvas, W, H);
+            grid.draw_to_canvas(&mut canvas, W, H);
 
-        render_text(
-            &mut canvas,
-            &texture_creator,
-            &font,
-            &format!("Frame Time: {:.5}", frame_time),
-            0,
-            0,
-        );
+            render_text(
+                &mut canvas,
+                &texture_creator,
+                &font,
+                &format!("AVG Frame Time: {:.5}", histogram.mean()),
+                0,
+                0,
+            );
 
-        render_text(
-            &mut canvas,
-            &texture_creator,
-            &font,
-            &format!("{:.1}FPS", 1.0 / frame_time),
-            0,
-            20,
-        );
+            render_text(
+                &mut canvas,
+                &texture_creator,
+                &font,
+                &format!("95th Frame Time: {}", histogram.value_at_quantile(0.95)),
+                0,
+                20,
+            );
 
-        canvas.present();
+            render_text(
+                &mut canvas,
+                &texture_creator,
+                &font,
+                if args.enable_astar {
+                    "RUNNING A*"
+                } else {
+                    "RUNNING PURE DIJKSTRA"
+                },
+                0,
+                40,
+            );
 
-        frame_time = start_time.elapsed().as_secs_f64();
+            canvas.present();
+
+            histogram
+                .record(last_frame.elapsed().as_micros() as u64)
+                .unwrap();
+
+            // TODO: technically we want the time between presents to be 1.0 / args.fps seconds
+            last_frame = Instant::now();
+        }
 
         for e in pump.poll_iter() {
             match e {
@@ -145,7 +180,9 @@ struct UnvisitedState {
 
 impl Ord for UnvisitedState {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.dist.cmp(&self.dist)
+        other
+            .dist
+            .cmp(&self.dist)
             .then(other.actual_dist.cmp(&self.actual_dist))
             .then_with(|| self.cell.cmp(&other.cell))
     }
@@ -159,6 +196,8 @@ impl PartialOrd for UnvisitedState {
 
 #[derive(Debug)]
 pub struct Grid {
+    enable_astar: bool,
+
     cells: Vec<Vec<CellState>>,
     unvisited: BinaryHeap<UnvisitedState>,
 
@@ -169,11 +208,12 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub fn new(w: u32, h: u32, start: (u32, u32), goal: (u32, u32)) -> Self {
+    pub fn new(w: u32, h: u32, start: (u32, u32), goal: (u32, u32), enable_astar: bool) -> Self {
         assert!(start.0 < w && start.1 < h, "start isn't in bounds");
         assert!(goal.0 < w && goal.1 < h, "goal isn't in bounds");
 
         let mut grid = Self {
+            enable_astar,
             cells: vec![vec![CellState::Unknown; h as usize]; w as usize],
             unvisited: BinaryHeap::new(),
             start,
@@ -275,7 +315,7 @@ impl Grid {
     }
 
     fn get_dist(&self, cell: (u32, u32), dist: u32) -> u32 {
-        if ENABLE_ASTAR {
+        if self.enable_astar {
             let euclid_dist = (((cell.0 as i32 - self.goal.0 as i32).pow(2)
                 + (cell.1 as i32 - self.goal.1 as i32).pow(2))
                 as f64)
@@ -302,8 +342,11 @@ impl Grid {
 
                     self.set_cell(n, CellState::Unvisited);
 
-                    self.unvisited
-                        .push(UnvisitedState { dist: self.get_dist(n, dist), actual_dist: dist, cell: n })
+                    self.unvisited.push(UnvisitedState {
+                        dist: self.get_dist(n, dist),
+                        actual_dist: dist,
+                        cell: n,
+                    })
                 }
                 CellState::Unvisited => continue,
                 CellState::Visited { dist } => {
